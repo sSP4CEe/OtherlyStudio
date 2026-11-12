@@ -7,116 +7,19 @@ import * as THREE from "three";
 import {
   Pen, bodyFront, bodySide, swingKid, soldier, townsfolk, OFFICER, KID, PARENT, fxNote, fxBurst, fxSplash, fxStars, fxCreak, fxRing, fxBlob, fxShadow, fxContact, fxPlank, fxDrum,
   Outfit, Expr, FrontOpts, SideOpts,
-} from "./toon";
+} from "../../engine/cast/toon";
+import {
+  Pool, Actor, Fx, Place, FxPlace, CamInfo, Stage, SU, SU_SWING, SUN, tmp, findSun, light2D, viewOf,
+} from "../../engine/cast/actor";
 import {
   FPS, D0, FILES, ROW_GAP, COUNT, PARK, SHOTS, SNAP, DROP0, DROP1, DROP_H, V3, front, marchPhase, stomp, deckY, dropW, dropU, shapeZ,
   smooth, clamp01, BridgeState,
 } from "./story";
-import { LIGHTS } from "./lights";
-import { NOINK } from "./ink";
-import { cardShade, blobMaterial, CARD_K } from "./cardshade";
+import { LIGHTS, LightName } from "../../engine/look/lights";
+import { NOINK } from "../../engine/post/ink";
 
-// ---------------- canvas pool ----------------
-type Entry = { cv: HTMLCanvasElement; tex: THREE.CanvasTexture; w: number; h: number };
-export type Req = { key: string; w: number; h: number; k: number; draw: (p: Pen) => void; tex?: THREE.CanvasTexture };
-const makeEntry = (w: number, h: number): Entry => {
-  const cv = document.createElement("canvas");
-  cv.width = w; cv.height = h;
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-  return { cv, tex, w, h };
-};
-export class Pool {
-  private live = new Map<string, Entry>();
-  private free: Entry[] = [];
-  private reqs: Req[] = [];
-  req(key: string, w: number, h: number, k: number, draw: (p: Pen) => void) {
-    const r: Req = { key: `${w}x${h}|${key}`, w, h, k, draw };
-    this.reqs.push(r);
-    return r;
-  }
-  flush() {
-    const want = new Map<string, Req[]>();
-    for (const r of this.reqs) { const l = want.get(r.key); if (l) l.push(r); else want.set(r.key, [r]); }
-    for (const [key, e] of this.live) if (!want.has(key)) { this.live.delete(key); this.free.push(e); }
-    for (const [key, rs] of want) {
-      let e = this.live.get(key);
-      if (!e) {
-        const r = rs[0], i = this.free.findIndex((x) => x.w === r.w && x.h === r.h);
-        e = i >= 0 ? this.free.splice(i, 1)[0] : makeEntry(r.w, r.h);
-        const g = e.cv.getContext("2d")!;
-        g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, e.w, e.h); g.setTransform(r.k, 0, 0, r.k, 0, 0);
-        r.draw(new Pen(g));
-        e.tex.needsUpdate = true;
-        this.live.set(key, e);
-      }
-      for (const r of rs) r.tex = e.tex;
-    }
-    this.reqs = [];
-  }
-}
-
-// ---------------- sprite meshes ----------------
-const blank = (() => { const c = document.createElement("canvas"); c.width = c.height = 2; return new THREE.CanvasTexture(c); })();
-export const SU = 0.00216; // metres per design unit: 1000 units = 2.16 m
-export const SU_SWING = 2.3 / 1830; // swing canvas: rope of 1830 units = 2.3 m
-const BODY = (() => { const g = new THREE.PlaneGeometry(600 * SU, 1000 * SU); g.translate(0, (975 - 500) * SU, 0); return g; })();
-const CARD = new THREE.PlaneGeometry(1, 1);
-/** world roots that hold actors (to find the scene's sun when world.ts does not pass it) */
-const ROOTS = new Set<THREE.Object3D>();
-
-/** lit flat character: cardShade() material, receives shadows (dims to the bright floor only), casts its silhouette
- *  when world.ts says so (golden). Drawn after the contact blobs (renderOrder 1). */
-export class Actor {
-  mesh: THREE.Mesh; mat: THREE.MeshLambertMaterial; dmat: THREE.MeshDepthMaterial; r: Req | null = null;
-  constructor(parent: THREE.Object3D, geo: THREE.BufferGeometry = BODY) {
-    this.mat = cardShade(new THREE.MeshLambertMaterial({ map: blank, alphaTest: 0.5, side: THREE.DoubleSide }));
-    this.mat.alphaToCoverage = false; // A2C + MSAA left 1 px sky-depth seams on blurred far cards (POST)
-    this.dmat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: blank, alphaTest: 0.5, side: THREE.DoubleSide });
-    this.mesh = new THREE.Mesh(geo, this.mat);
-    this.mesh.customDepthMaterial = this.dmat;
-    // rim width is in output pixels: tell the card shader the render height (1920 = 1080 x 1920 frame)
-    this.mesh.onBeforeRender = (r) => { const rt = r.getRenderTarget(); CARD_K.uPx.value = (rt ? rt.height : r.domElement.height) / 1920; };
-    this.mesh.castShadow = false; this.mesh.receiveShadow = true; this.mesh.visible = false;
-    this.mesh.rotation.order = "YXZ"; this.mesh.renderOrder = 1; this.mesh.layers.set(NOINK);
-    parent.add(this.mesh);
-    ROOTS.add(parent);
-  }
-  bind() { const t = this.r?.tex; if (t) { this.mat.map = t; this.dmat.map = t; } }
-}
-/** unlit effect card: hard cut-out (ink drawings), soft see-through (dust, mist) or a multiply ground blob */
-export class Fx {
-  mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; soft: THREE.MeshBasicMaterial; blob: THREE.MeshBasicMaterial; r: Req | null = null;
-  constructor(parent: THREE.Object3D) {
-    this.mat = new THREE.MeshBasicMaterial({ map: blank, alphaTest: 0.5, side: THREE.DoubleSide });
-    this.mat.alphaToCoverage = false; // A2C + MSAA left 1 px sky-depth seams on blurred far cards (POST)
-    this.soft = new THREE.MeshBasicMaterial({ map: blank, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-    this.blob = blobMaterial(blank);
-    this.mesh = new THREE.Mesh(CARD, this.mat);
-    this.mesh.visible = false; this.mesh.layers.set(NOINK);
-    parent.add(this.mesh);
-  }
-  use(soft: boolean) { this.mesh.material = soft ? this.soft : this.mat; }
-  bind() {
-    const t = this.r?.tex;
-    if (!t) return;
-    if (this.r!.key.includes("|blob|")) {
-      // no mipmaps: at grazing views the mip chain averages the blob with its white surround and it fades out
-      if (t.generateMipmaps) { t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.needsUpdate = true; }
-      this.blob.map = t; this.mesh.material = this.blob; this.mesh.renderOrder = 0.5;
-    }
-    else { this.mat.map = t; this.soft.map = t; this.mesh.renderOrder = 0; }
-  }
-}
-
-// ---------------- placements ----------------
-export type Place = {
-  key: string; draw: (p: Pen) => void; x: number; y: number; z: number;
-  scale?: number; mirror?: boolean; yaw?: number; geo?: "body" | "swing"; roll?: number; size?: [number, number, number];
-};
-export type FxPlace = { key: string; cw: number; ch: number; draw: (p: Pen) => void; x: number; y: number; z: number; w: number; h: number; flat?: boolean; rot?: number; soft?: boolean };
-/** sun = world direction TOWARD the sun (optional: when absent the scene's shadow-casting light is used) */
-export type CamInfo = { pos: THREE.Vector3; right: THREE.Vector3; sun?: THREE.Vector3 };
+export { Pool, Actor, Fx, SU_SWING };
+export type { Place, FxPlace, CamInfo, Stage };
 
 const hh = (i: number, s = 0) => { const v = Math.sin(i * 127.1 + s * 311.7) * 43758.5453; return v - Math.floor(v); };
 const q = (v: number, n = 120) => Math.round(v * n) / n;
@@ -131,39 +34,7 @@ const tier = (d: number): [number, number, number] =>
   d < 3.2 ? [1800, 3000, 3.0] : d < 6.5 ? [1080, 1800, 1.8] : d < 16 ? [480, 800, 0.8] : [240, 400, 0.4];
 
 // ---------------- light ----------------
-const SUN = new THREE.Vector3(0.5, 0.75, -0.4).normalize();
-const tmp = new THREE.Vector3();
-let LNAME: "day" | "golden" = "day";
-const sunOf = (root: THREE.Object3D) => {
-  let s: THREE.DirectionalLight | null = null;
-  root.traverse((o) => { if (!s && o instanceof THREE.DirectionalLight && o.castShadow) s = o; });
-  return s as THREE.DirectionalLight | null;
-};
-/** the sun of the world that is calling: the attached root whose sun target sits on this camera's view axis */
-const findSun = (cam: CamInfo, out: THREE.Vector3) => {
-  if (cam.sun) return out.copy(cam.sun).normalize();
-  let best: THREE.DirectionalLight | null = null, err = Infinity;
-  for (const r of ROOTS) {
-    if (!r.parent) continue;
-    const s = sunOf(r);
-    if (!s) continue;
-    const d = tmp.copy(s.target.position).sub(cam.pos), e = Math.abs(d.dot(cam.right)) / (d.length() || 1);
-    if (e < err) { err = e; best = s; }
-  }
-  return best ? out.copy(best.position).sub(best.target.position).normalize() : out;
-};
-/** canvas angle the sun comes FROM on an upright card facing the camera, in 45-degree steps (small texture cache) */
-const light2D = (cam: CamInfo, mirror: boolean) => {
-  const sx = SUN.dot(cam.right) * (mirror ? -1 : 1), sy = -SUN.y;
-  return Math.round(Math.atan2(sy, sx) / (Math.PI / 4)) * (Math.PI / 4);
-};
-
-/** front / side view and mirroring for someone at (x, z) walking along (dx, dz); fs = foreshortening of the walk */
-const viewOf = (cam: CamInfo, x: number, z: number, dx: number, dz: number) => {
-  const tx = cam.pos.x - x, tz = cam.pos.z - z, tl = Math.hypot(tx, tz) || 1;
-  const c = (tx * dx + tz * dz) / tl;
-  return { side: c < 0.57, mirror: dx * cam.right.x + dz * cam.right.z < 0, fs: Math.round(Math.sqrt(Math.max(0, 1 - c * c)) * 20) / 20 };
-};
+let LNAME: LightName = "day";
 
 // ---------------- life: blinks and reaction timing ----------------
 /** reference expression and action changes land 0-3 f before the word onset */
@@ -203,13 +74,16 @@ const person = (cam: CamInfo, who: Who, x: number, y: number, z: number, view: {
 /** ground shadow under a standing / sitting card (review rounds 2-4), multiply, blue-violet: a TIGHT contact pool right under
  *  the feet (~.5 on screen at the core) so nobody floats, plus by day (cards cast no real shadow) a lighter soft tail
  *  stretched AWAY from the sun, length ~1.6 m / tan(sun elevation), capped. Golden: world.ts casts real card shadows. */
-const CONTACT: Record<"day" | "golden", [number, number, number]> = { day: [0.2, 0.21, 0.33], golden: [0.24, 0.2, 0.33] };
+const CONTACT: Record<LightName, [number, number, number]> = {
+  day: [0.2, 0.21, 0.33], golden: [0.24, 0.2, 0.33], overcast: [0.3, 0.31, 0.38],
+  dusk: [0.28, 0.24, 0.36], night: [0.22, 0.24, 0.36], interior_warm: [0.32, 0.26, 0.24],
+};
 const TAIL: [number, number, number] = [0.42, 0.44, 0.62];
 const toSrgb = (v: number) => { const c = clamp01(v); return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055; };
 const hexOf = (c: [number, number, number], k: number) => "#" + c.map((v) => Math.round(255 * toSrgb(1 - (1 - v) * k)).toString(16).padStart(2, "0")).join("");
 const blob = (out: Stage, x: number, y: number, z: number, sc = 1, k = 1) => {
   const hl = Math.hypot(SUN.x, SUN.z) || 1, ox = -SUN.x / hl, oz = -SUN.z / hl, rot = Math.atan2(-ox, -oz);
-  if (LNAME === "day") {
+  if (!LIGHTS[LNAME].actorShadow) {
     const el = Math.asin(Math.min(0.99, Math.max(0.1, SUN.y)));
     const len = Math.min(2.4, Math.max(0.5, 1.6 / Math.tan(el))) * sc, h = len + 0.55 * sc, c = 0.3 * h; // feet at v = .2 of the card
     const tc = hexOf(TAIL, k);
@@ -221,9 +95,7 @@ const blob = (out: Stage, x: number, y: number, z: number, sc = 1, k = 1) => {
     w: 0.52 * sc, h: 0.4 * sc, flat: true, rot });
 };
 
-// ---------------- crowd by shot ----------------
-export type Stage = { places: Place[]; fx: FxPlace[] };
-
+// ---------------- crowd by shot (BRIDGE CONTENT: replace per episode) ----------------
 const exprMarch = (id: number, t: number, i: number, tau: number): { expr: Expr; look: number } => {
   const lau = i % 3 === 0, whi = i % 5 === 1, L = LEAD;
   switch (id) {

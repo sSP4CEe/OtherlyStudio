@@ -62,10 +62,13 @@ Or open it in the Remotion preview with `npm run studio`.
 |---|---|
 | `SKILL.md` | The skill: the full pipeline, every rule, every fix and the final look values |
 | `setup.ps1`, `setup.sh` | One-command setup |
-| `studio/` | The Remotion project. `src/videos/bridge/` is the example short, the template for every new one |
+| `studio/` | The Remotion project. `src/engine/` is the shared renderer; `src/episodes/broughton/` is the example episode and the template for every new one |
+| `studio/src/series/otherly/` | Series bible, style contract, character canon and place canon |
+| `studio/episodes.json` | Episode manifest used by the render and QA scripts |
 | `studio/shorts/bridge/` | The example's script and sound scripts (synthesized SFX, music, mix) |
-| `studio/scripts/` | Model download, still renders, side-by-side sheets, sandbox merge, frame-by-frame QA |
+| `studio/scripts/` | Model download, still renders, episode shot export, side-by-side sheets, sandbox merge, frame-by-frame QA |
 | `references/` | The measured style formula and seven look reports (colour, ink, light, depth, motion, textures, characters) |
+| `docs/OTHERLY_PIPELINE.md` | How the engine, episodes, presets, canon and tooling fit together |
 
 ## What this copy fixes compared to the original
 

@@ -7,7 +7,7 @@
 // preset gradient, and the preset tint (measured on WHITE heads) is applied at TINT_K so peach skin stays clean
 // (lighting.md 9.1 note: golden ~[1, .88, .76], day ~[1, .97, .96] for peach skin).
 import * as THREE from "three";
-import { LFB, CHAR } from "./shade";
+import { LFB, CHAR } from "../look/shade";
 
 export const GRAD_K = 5.5;   // head: preset charGrad x5.5, capped at .4 linear: ~14 % on screen after the grade /
                              // tone-map highlight roll-off (faces sit at ~.96 there; review round 2)

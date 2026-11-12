@@ -10,11 +10,12 @@ export const FILES = [-1.65, -0.55, 0.55, 1.65];
 export const ROW_GAP = 1.3;
 export const COUNT = 74;
 export const PARK: V3 = [70, D0, -75]; // swing pivot base (x, ground y, z)
-export type V3 = [number, number, number];
 
-export const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
-export const smooth = (x: number) => { const u = clamp01(x); return u * u * (3 - 2 * u); };
-export const easeOut = (u: number) => 1 - (1 - clamp01(u)) ** 4;
+import { V3, clamp01, smooth, easeOut, Cam, Shot, Key, glide, dolly, zoom, rolled, runKeys } from "../../engine/stage/camera";
+import { layersAt as layersAtGeneric, shotAt as shotAtGeneric, DofKey, dofAt as dofAtGeneric } from "../../engine/stage/timeline";
+import type { LightName } from "../../engine/look/lights";
+export type { V3, Cam };
+export { clamp01, smooth, easeOut, glide, dolly, zoom, rolled };
 const lin = (pts: [number, number][], x: number) => {
   if (x <= pts[0][0]) return pts[0][1];
   for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) {
@@ -40,7 +41,7 @@ export type BridgeState = { bounce: number; drop: number; snap: number; collapse
 export const deckY = (z: number, b: BridgeState) => D0 + b.bounce * shapeZ(z) - b.drop * DROP_H * dropW(z);
 
 // ---------------- shots ----------------
-export type Light = "day" | "golden";
+export type Light = LightName;
 export type Crowd = "march" | "fall" | "water" | "bank" | "tourists" | "none";
 export type ShotDef = { id: number; a: number; b: number; light: Light; crowd: Crowd; tau: (t: number) => number; towns?: boolean };
 export const SHOTS: ShotDef[] = [
@@ -64,15 +65,9 @@ export const SHOTS: ShotDef[] = [
 export const XFADE: Record<number, number> = { 9: 6, 11: 8, 12: 8, 13: 8, 14: 8, 15: 8 };
 export const FLASH_AT = 130;
 
-export const shotAt = (f: number) => SHOTS.find((s) => f >= s.a && f < s.b) ?? SHOTS[SHOTS.length - 1];
+export const shotAt = (f: number) => shotAtGeneric(SHOTS, f);
 /** layers to draw at frame f: base shot, plus the next shot fading in during a crossfade */
-export const layersAt = (f: number): { id: number; alpha: number }[] => {
-  for (const s of SHOTS) {
-    const x = XFADE[s.id];
-    if (x && f >= s.a - x / 2 && f < s.a + x / 2) return [{ id: s.id - 1, alpha: 1 }, { id: s.id, alpha: (f - (s.a - x / 2) + 1) / (x + 1) }];
-  }
-  return [{ id: shotAt(f).id, alpha: 1 }];
-};
+export const layersAt = (f: number) => layersAtGeneric(SHOTS, XFADE, f);
 
 export const bridgeState = (id: number, t: number): BridgeState => {
   const s = SHOTS[id - 1];
@@ -92,25 +87,6 @@ export const bridgeState = (id: number, t: number): BridgeState => {
 // whoosh in the sound mix peaks there), so a glide key starts dur/2 earlier. Holds push in (dolly toward the look
 // point or a fov zoom near walls/towers): 0.15-0.35 %/f, ~0.6 %/f for ~35 f on the punch words. Rolls of 4-8 deg
 // over >= 18 f on emphasis beats, held tilt <= 0.07 rad.
-export type Cam = { pos: V3; look: V3; fov: number; roll: number };
-type Shot = Partial<Cam> & { pos: V3; look: V3 };
-type Key = { f: number; dur?: number; cut?: boolean; s: (f: number) => Shot };
-/** reference camera ease: symmetric smootherstep (attack = release, ~10 f each on a 23 f move) */
-export const glide = (u: number) => { const x = clamp01(u); return x * x * x * (x * (6 * x - 15) + 10); };
-const mix = (a: Cam, b: Cam, k: number): Cam => ({
-  pos: a.pos.map((v, i) => v + (b.pos[i] - v) * k) as V3, look: a.look.map((v, i) => v + (b.look[i] - v) * k) as V3,
-  fov: a.fov + (b.fov - a.fov) * k, roll: a.roll + (b.roll - a.roll) * k,
-});
-const full = (c: Shot): Cam => ({ fov: 40, roll: 0, ...c });
-const run = (keys: Key[], f: number) => {
-  let cur = full(keys[0].s(f));
-  for (let i = 1; i < keys.length; i++) {
-    const k = keys[i];
-    if (f < k.f) break;
-    cur = k.cut ? full(k.s(f)) : mix(cur, full(k.s(f)), glide((f - k.f) / (k.dur ?? 24)));
-  }
-  return cur;
-};
 const T = (f: number) => f / FPS;
 const Fz = (id: number, f: number) => front(SHOTS[id - 1].tau(T(f)));
 /** push-in factor since f0: the subject grows ~rate per frame; `punch` raises it (with 8 f soft edges) for the first n frames */
@@ -121,13 +97,6 @@ const pushK = (f: number, f0: number, rate: number, punch = 0, n = 35) => {
   return Math.exp(-s);
 };
 /** dolly push: camera slides toward the look point by factor k */
-const dolly = (pos: V3, look: V3, k: number, rest: Partial<Cam> = {}): Shot =>
-  ({ pos: [look[0] + (pos[0] - look[0]) * k, look[1] + (pos[1] - look[1]) * k, look[2] + (pos[2] - look[2]) * k], look, ...rest });
-/** zoom push (camera stays put, for lenses next to towers / houses): tan(fov/2) shrinks by k */
-const zoom = (pos: V3, look: V3, fov: number, k: number, rest: Partial<Cam> = {}): Shot =>
-  ({ pos, look, fov: (360 / Math.PI) * Math.atan(Math.tan((fov * Math.PI) / 360) * k), ...rest });
-/** a roll-only move on top of an existing framing */
-const rolled = (s: (f: number) => Shot, roll: number) => (f: number): Shot => ({ ...s(f), roll });
 
 // near-left anchorage where the bolt lives, and the free end of the snapped backstay
 export const ANCHOR: V3 = [-2.7, D0 + 0.62, -37];
@@ -273,7 +242,7 @@ export const kickAt = (t: number) => {
   return a;
 };
 export const camAt = (id: number, f: number): Cam => {
-  const c = run(CAMS[id], f), a = kickAt(T(f));
+  const c = runKeys(CAMS[id], f), a = kickAt(T(f));
   if (!a) return c;
   const d: V3 = [c.look[0] - c.pos[0], c.look[1] - c.pos[1], c.look[2] - c.pos[2]];
   const L = Math.hypot(...d), h = Math.hypot(d[0], d[2]) || 1;
@@ -293,7 +262,7 @@ export const keyEnd = (id: number, f: number) => {
  *  foreground objects 4-8 (disc radius at 1080p = 3 x sigma720). Establishing/wide/most full shots stay sharp.
  *  Entries switch on cuts (no dur) or ramp with the camera glide they share f/dur with. focus = world point (else the
  *  camera look point). */
-export type Dof = { f: number; dur?: number; cInf: number; focus?: (f: number) => V3 };
+export type Dof = DofKey;
 const eyes = (id: number) => (f: number): V3 => [0, D0 + 1.6, Fz(id, f)];
 const boots = (id: number) => (f: number): V3 => [0, D0 + 0.3, Fz(id, f)];
 export const DOF: Dof[] = [
@@ -319,12 +288,7 @@ export const DOF: Dof[] = [
   { f: 1770, cInf: 12, focus: () => [3.35, D0 + 1.6, -31.55] }, // officer MS at the sign (his eyes), bush in front
   { f: 1863, cInf: 0 }, // tourists (busy crowd beat, kept sharp), crane out
 ];
-export const dofAt = (f: number) => {
-  let i = 0; while (i + 1 < DOF.length && f >= DOF[i + 1].f) i++;
-  const d = DOF[i], p = DOF[Math.max(0, i - 1)];
-  const k = d.dur ? Math.min(1, (f - d.f) / d.dur) : 1;
-  return { cInf: p.cInf + (d.cInf - p.cInf) * k, focus: d.focus };
-};
+export const dofAt = (f: number) => dofAtGeneric(DOF, f);
 /** what the lens focuses on (DOF): the DOF table's focus point, else the camera look point */
 export const focusAt = (id: number, f: number): V3 => {
   const d = dofAt(f);

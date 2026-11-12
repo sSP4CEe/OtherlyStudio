@@ -6,7 +6,7 @@ description: Make a ~55-70 s vertical cartoon story short in the "2D characters 
 # Cartoon 3D story short (three.js + Remotion)
 
 Proven example: **The Bridge That Fell for a Song**. It is an original 67 s short about the 1831 Broughton bridge and 74 soldiers marching in step.
-- Code: `studio/src/videos/bridge/` (composition `BridgeShort`, 1080x1920, 30 fps).
+- Code: `studio/src/episodes/broughton/` (content) on the shared renderer in `studio/src/engine/` (composition `BridgeShort`, 1080x1920, 30 fps). Episode/series registry: `studio/src/episodes/index.ts` + `studio/src/series/otherly/`.
 - Script, voice and sound: `studio/shorts/bridge/` (SCRIPT.md, voice/, audio/).
 - Style research: `references/`.
 
@@ -55,8 +55,9 @@ User rules that apply:
 3. **Voice.** Record or generate `voice.wav`, then make its word timings `words.json` (any speech-to-text with word times).
    - Put them in the project folder, `studio/shorts/<name>/voice/`.
    - Hand-fix the word timings. Everything is timed to words.json.
-4. **Shot plan** in `story.ts`: copy `studio/src/videos/bridge/` (the final bridge source) to `studio/src/videos/<name>/`, register a new composition next to `BridgeShort` in `src/Root.tsx`, and rename it.
-   - `SHOTS`: id, a/b frames, light day/golden, crowd mode, `tau` story time.
+4. **Episode plan** in `story.ts`: copy `studio/src/episodes/broughton/` to `studio/src/episodes/<name>/`, add its definition to `studio/src/episodes/index.ts` (the `<Composition>` is generated from it), and add an entry to `studio/episodes.json` for the tooling.
+   - Keep `src/engine/` untouched unless the change is genre-wide: that folder is the renderer.
+   - `SHOTS`: id, a/b frames, light preset (`day`, `golden`, `overcast`, `dusk`, `night`, `interior_warm`), crowd mode, `tau` story time.
    - `XFADE`: crossfades at place/time changes.
    - `FLASH_AT`: a white flash after the hook.
    - `CAMS`: per-shot keys `{f, dur?, cut?, s: f => {pos, look, fov, roll}}`.
@@ -65,24 +66,26 @@ User rules that apply:
    - `FOREGROUND`: near framing props.
    - Every visual reaction lands 0-3 frames before its word.
 5. **World.**
-   - `lights.ts`: LIGHTS plus the LOOK sky/river/cloud palette per light.
+   - Genre preset: pick a light from `engine/look/lights.ts` (`LIGHTS` + `LOOK`), or add one (one entry in each table, plus `GRADES`).
    - `shade.ts`: two-tone shading and `untone()`.
-   - `build.ts`: town, houses and Kenney CC0 kit props, recoloured, with sight-line culling of anything blocking a camera.
+   - `build.ts`: reusable geometry, materials and Kenney CC0 kit props, with sight-line culling of anything blocking a camera.
+   - `<episode>/town.ts` (or another set): the episode's actual set layout.
    - `paint.ts`: HD Canvas2D painted textures with seams painted in as dark tints.
    - `world.ts`: sky shader, fog = horizon colour, river, per-frame posing, sun frozen per shot and camera-relative.
 6. **Characters.**
-   - `toon.ts`: the Canvas2D `Pen` drawing API, 600x1000 design canvas, soles at y = 975, bean heads, stick limbs, plum variable-width outline, face library.
-   - `cast.ts`: camera-facing billboards, crowds, effect cards, blinks, walk cycles. All billboards go on the `NOINK` layer.
-   - `cardshade.ts`: cards lit by the scene light, no emissive.
-7. **Post** (`Bridge.tsx` + `ink.ts` + `lensblur.ts` + `grade.ts`).
+   - `engine/cast/toon.ts`: the Canvas2D `Pen` drawing API, 600x1000 design canvas, soles at y = 975, bean heads, stick limbs, plum variable-width outline, face library.
+   - `engine/cast/actor.ts`: camera-facing billboards, effect cards, blinks, walk cycles. All billboards go on the `NOINK` layer.
+   - `engine/cast/cardshade.ts`: cards lit by the scene light, no emissive.
+   - `<episode>/cast.ts`: the episode's blocking, expressions and crowd by shot.
+7. **Post** (`engine/episode/Episode.tsx` + `engine/post/ink.ts` + `lensblur.ts` + `grade.ts`).
    - Composer order: ink → lens pre → lens main → bloom → NEUTRAL tone map → grade (MSAA 4).
    - Every pixel parameter scales with output height / 1920.
 8. **Sound** (copy `studio/shorts/bridge/audio/` to `studio/shorts/<name>/audio/`: timeline.py, sfx_gen.py, sfx.py, music.py, instruments.py, dsp.py, mix.py).
    - Event table → synthesized SFX plus an original score ducked under the voice.
    - Output: mix.wav (48 kHz, exact length), stems and cues.md.
    - Lock the picture's time constants before the sound is made. Any later timing change means re-running the sound.
-9. **Look checks.** Run `node scripts/bridge-stills.mjs out/<name>/x_ 100,400 0.5`.
-   - Set `BRIDGE_ENTRY=src/sandboxes/<n>/index.tsx` to render a sandbox copy.
+9. **Look checks.** Run `node scripts/bridge-stills.mjs out/<name>/x_ 100,400 0.5` (composition defaults to the first episode; pass a 4th arg or `EPISODE=<id>`).
+   - Set `EPISODE_ENTRY=src/sandboxes/<n>/index.tsx` (legacy `BRIDGE_ENTRY` still works) to render a sandbox copy.
    - Make side-by-sides against reference frames with `python scripts/sbs_sheet.py out.jpg --ours ... --ref ...`.
    - Send them to an Opus max verifier: 1-3 images, a ≤200-word verdict.
 10. **Final render.**
@@ -92,28 +95,28 @@ User rules that apply:
     - Fix anything it finds, then run a deep Opus audit.
 11. **Deliver.** SendUserFile the final mp4, update memory, write notes.
 
-## Final look values (bridge after 4 verifier rounds; all in `studio/src/videos/bridge/`)
-Start every new short from `studio/src/videos/bridge/` (copy to `studio/src/videos/<name>/`): the look lives in these values, the
-story lives in story.ts / build.ts layout / cast.ts roles. Opus max scores at the end: colour day 7, golden 5-6,
+## Final look values (bridge after 4 verifier rounds; all in `studio/src/engine/` + `studio/src/episodes/broughton/`)
+Start every new short from `studio/src/episodes/broughton/` (copy to `studio/src/episodes/<name>/`) and reuse `studio/src/engine/`: the look lives in these values, the
+story lives in story.ts / the set layout / cast.ts roles. Opus max scores at the end: colour day 7, golden 5-6,
 lighting 5-6, ink 6, textures 5-6, characters 7, depth 6-7, composition 6-7 (from 5/3/4/5/4/7/4/6 at the start).
-- **Light presets** (`lights.ts`, sun camera-relative and frozen per shot):
+- **Light presets** (`engine/look/lights.ts`, sun camera-relative and frozen per shot):
   - day: az 75 / el 48, lit [1.58,1.5,1.33], shade [.30,.29,.36], lift [.05,.06,.11] (cool tint ONLY in shade), sky
     top #3e7fd2 → horizon #b8d0ec, fog = horizon, 25→300 m, uSat 1.08, ~15 % blue haze past 60 m.
   - golden: az 6 / el 7 (backlit low sun), key toward #FFB36B ×1.5, violet-blue shade (facade ≈ #444380), sky
     #ffc47c → #8a6f8a, peach fog only past 50 m, sun disc #ffcf9e + bloom, contact blobs + real card shadows.
-- **Albedos** (`paint.ts`/`build.ts`): muted brick / cream / ochre / terracotta houses with plinth, cornice, sills,
+- **Albedos** (`engine/look/paint.ts` + `engine/build/build.ts`): muted brick / cream / ochre / terracotta houses with plinth, cornice, sills,
   hoods, door step, chimney + pot, heights 7 / 8.4 / 9.8 m; warm grey/beige stone (saturation −35 % from "storybook");
   ochre wood deck C* ~51-58 with near-black seams; iron dark and desaturated. Never lemon, never lavender lit faces.
-- **Ink** (`ink.ts`): #030303, 5.1 px near (6 m) → 3.3 px far (90 m) at 1080x1920, creases ×0.8 from 35°, depth
+- **Ink** (`engine/post/ink.ts`): #030303, 5.1 px near (6 m) → 3.3 px far (90 m) at 1080x1920, creases ×0.8 from 35°, depth
   jumps from 1 %, fog tint 0.3 only far; character cards on layer `NOINK` (they carry their own plum ink).
-- **Lens** (`lensblur.ts` + `dofAt` in story.ts): cInf px at 1080: hook/river CU 15-16, close-ups 12-14, MS 10-12,
+- **Lens** (`engine/post/lensblur.ts` + `dofAt` in the episode's story.ts): cInf px at 1080: hook/river CU 15-16, close-ups 12-14, MS 10-12,
   park 7, golden sway 5, wides/aerials 0. Focus on the eyes of the front row.
-- **Post** (`Bridge.tsx`): ink → lens pre → lens main → bloom (thr 1.0, int .5, 6 levels, radius .6) → NEUTRAL tone
+- **Post** (`engine/episode/Episode.tsx`): ink → lens pre → lens main → bloom (thr 1.0, int .5, 6 levels, radius .6) → NEUTRAL tone
   map → grade; MSAA 4. Film grain exists but is OFF (reference measures no grain; it quadruples the file size).
-- **Characters** (`toon.ts`/`cast.ts`/`cardshade.ts`): bean heads h/w .94, plum ink #241726, eyes .26 W apart, no blush,
+- **Characters** (`engine/cast/toon.ts` + `actor.ts` + `cardshade.ts`, blocking in `<episode>/cast.ts`): bean heads h/w .94, plum ink #241726, eyes .26 W apart, no blush,
   14 expressions; adults 3.5 head-heights; walk bob 5 %, lean 1-7°, planted 0.8 m stride; blinks 0.5-2.3 s; tight
   contact shadow ~.5 under the feet + sun-direction tail by day; golden rim inner only (never an offset outer copy).
-- **Camera** (`story.ts`): cuts on big jumps, smootherstep glides 18-40 f, every hold creeps (no static hold ≥4 f),
+- **Camera** (episode `story.ts`, helpers in `engine/stage/camera.ts`): cuts on big jumps, smootherstep glides 18-40 f, every hold creeps (no static hold ≥4 f),
   flip kicks decaying over 7 f on impacts, 4-4.6° rolls, foreground props (`FOREGROUND`) in ~1/3 of shots.
 
 ## Look targets (measured from the reference; see references/reports/)
@@ -142,14 +145,15 @@ lighting 5-6, ink 6, textures 5-6, characters 7, depth 6-7, composition 6-7 (fro
 
 ## Look-match loop (how the bridge look was reached; reuse for any "make it look like X" pass)
 1. **Measure the reference first.** One analysis agent per topic (motion, depth, textures, characters, lighting, outlines, grade), each writing numbers, not adjectives, to `references/reports/<topic>.md`. Shared brief: `compare/CONTEXT.md`. Reports are the source of truth for every agent after.
-2. **Sandboxes, one owner per file.** Copy the project folder to `src/videos/<name>_{cam,world,mat,char,post}` with entries `src/sandboxes/<n>/index.tsx` (same `index.tsx` as main, only the import path changed). Ownership used for the bridge:
+2. **Sandboxes, one owner per file.** Copy the project folder to `src/sandboxes/bridge_{cam,world,look,mat,char,post}/` with entries `src/sandboxes/<n>/index.tsx` (same `index.tsx` as main, only the import path changed). Ownership used for the bridge:
    - cam: story.ts (camera keys, cuts, kicks, DOF table, foreground props)
-   - world: world.ts, lights.ts, shade.ts, grade.ts (sun, sky, fog, river, colour, grade)
+   - world: world.ts, town.ts (sun, sky, fog, river, set)
+   - look: lights.ts, shade.ts (presets, two-tone shading, colour)
    - mat: paint.ts, build.ts (painted textures, buildings, props)
-   - char: toon.ts, cast.ts, cardshade.ts (character drawing, posing, card lighting, fx cards)
-   - post: ink.ts, Bridge.tsx, lensblur.ts (outline pass, composer, lens blur, bloom)
-   Agents only edit their own files in their own sandbox and render stills with `BRIDGE_ENTRY=src/sandboxes/<n>/index.tsx node scripts/bridge-stills.mjs out/<name>/<n>/x_ <frames> 0.5`.
-3. **Merge** with `python scripts/bridge_merge.py [cam,world,mat,char,post]` (backs main up to `backup/bridge_<time>/`, copies owned files only). Then `npx tsc --noEmit` (filter to the project folder), then **re-sync every sandbox from main** (`cp -f src/videos/<name>/* src/videos/<name>_<n>/`) before the next round.
+   - char: toon.ts, cardshade.ts, cast.ts (character drawing, posing, card lighting, fx cards)
+   - post: ink.ts, lensblur.ts, grade.ts, Episode.tsx (outline pass, composer, lens blur, bloom, grade)
+   Agents only edit their own files in their own sandbox and render stills with `EPISODE_ENTRY=src/sandboxes/<n>/index.tsx node scripts/bridge-stills.mjs out/<name>/<n>/x_ <frames> 0.5`.
+3. **Merge** with `python scripts/bridge_merge.py [cam,world,look,mat,char,post]` (backs the episode + engine up to `backup/bridge_<time>/`, copies owned files only). Then `npx tsc --noEmit` (filter to the project folder), then **re-sync every sandbox from main** before the next round.
 4. **Verify** with a fresh Opus max agent: side-by-side sheets (`python scripts/sbs_sheet.py out.jpg --ours a b --ref r1 r2`), score each area out of 10 (colour day / golden, lighting, ink, textures, characters, depth, composition) plus a numbered fix list with frame numbers. Map each fix to the file owner and resume that owner's agent with SendMessage (keeps its context). Bridge scores: round 1 5/3/4/5/4/7/4/6 → round 2 5/4/5/6/4/7/6/6 → round 3 see notes.
 5. Contracts between owners live in exported constants (e.g. `NOINK` layer from ink.ts, `dofAt`/`FOREGROUND` from story.ts, `LIGHTS`/`LOOK` from lights.ts). Changing a contract means telling every owner that reads it.
 

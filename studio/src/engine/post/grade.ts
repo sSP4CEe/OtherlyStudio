@@ -166,13 +166,48 @@ export const GRADE_GOLDEN2: GradeParams = {
   tintS: [0.02, 0.002], tintM: [0, 0], tintH: [-0.012, 0.006],
   vig: [0.2, 0.4],
 };
-export const GRADES: Record<"day" | "golden", GradeParams> = { day: GRADE_DAY2, golden: GRADE_GOLDEN2 };
+// Additional series presets (same curve family, different mood). Fitted by eye against the look targets in
+// references/reports/grade.md; re-fit on renders the way day/golden were. Measured on a bridge still
+// (scripts/still_stats.py, mean RGB at 540x960): dusk 1500 R89 G75 B96, night 700 R55 G60 B79.
+// Tint units are (Cb, Cr): +Cb = blue, +Cr = red. Night shadows must be COOL; an early fit with warm
+// shadows (+Cr) measured R > B on a night still, which is the wrong direction for moonlight.
+export const GRADE_OVERCAST: GradeParams = {
+  ky: [0, 0.095, 0.26, 0.52, 0.79, 0.93, 1],
+  sat: [0.95, 0.92, 0.9],
+  tintS: [0.01, 0.008], tintM: [0.005, 0.01], tintH: [0, -0.005],
+  vig: [0.1, 0.5],
+};
+export const GRADE_DUSK: GradeParams = {
+  ky: [0, 0.085, 0.245, 0.53, 0.8, 0.935, 1],
+  sat: [1.05, 1.1, 1.15],
+  tintS: [-0.025, 0.02], tintM: [0.02, -0.01], tintH: [-0.01, 0.02],
+  vig: [0.18, 0.4],
+};
+export const GRADE_NIGHT: GradeParams = {
+  ky: [0, 0.075, 0.22, 0.5, 0.78, 0.93, 1],
+  sat: [0.85, 1.0, 1.05],
+  tintS: [0.03, -0.018], tintM: [0.014, -0.008], tintH: [0.0, 0.006],
+  vig: [0.26, 0.33],
+};
+export const GRADE_INTERIOR_WARM: GradeParams = {
+  ky: [0, 0.1, 0.28, 0.58, 0.82, 0.945, 1],
+  sat: [0.98, 1.06, 1.0],
+  tintS: [0.012, 0.004], tintM: [0.02, -0.012], tintH: [0.018, -0.014],
+  vig: [0.16, 0.42],
+};
+
+/** A grade preset name. It normally matches the shot's light, but an episode may grade independently. */
+export type GradeName = "day" | "golden" | "overcast" | "dusk" | "night" | "interior_warm";
+
+export const GRADES: Record<GradeName, GradeParams> = {
+  day: GRADE_DAY2, golden: GRADE_GOLDEN2, overcast: GRADE_OVERCAST, dusk: GRADE_DUSK, night: GRADE_NIGHT, interior_warm: GRADE_INTERIOR_WARM,
+};
 /** One strength (0..1, the effect's `amount`) per preset, set against the NEW world (bridge_world, 2026-10-31): full-strength
  *  presets overshot (day median Y' .59-.67 vs target .571, golden .58 vs .52); day 0.65 / golden 0.45 land at
  *  .54-.62 / ~.52. Re-fit the presets (grade.md 5.C) after the merge and raise these again. */
-export const GRADE_STRENGTH: Record<"day" | "golden", number> = { day: 1, golden: 1 };
+export const GRADE_STRENGTH: Record<GradeName, number> = { day: 1, golden: 1, overcast: 1, dusk: 1, night: 1, interior_warm: 1 };
 /** Apply the preset of a light to the effect (only touches uniforms when the light changes). */
-export function gradeFor(fx: GradeEffect, light: "day" | "golden") {
+export function gradeFor(fx: GradeEffect, light: GradeName) {
   const tag = fx as unknown as { _light?: string };
   if (tag._light !== light) { fx.set(GRADES[light]); tag._light = light; }
   fx.amount = GRADE_STRENGTH[light];

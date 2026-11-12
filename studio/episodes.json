@@ -1,0 +1,22 @@
+{
+  "series": {
+    "id": "otherly",
+    "title": "Otherly",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "exportScale": 1.3333
+  },
+  "episodes": [
+    {
+      "id": "BridgeShort",
+      "title": "The Bridge That Fell for a Song",
+      "dir": "src/episodes/broughton",
+      "story": "src/episodes/broughton/story.ts",
+      "entry": "src/index.ts",
+      "outDir": "out/broughton",
+      "audioDir": "shorts/bridge/audio",
+      "status": "released"
+    }
+  ]
+}

@@ -2,14 +2,14 @@
 // backstays, anchors, bunting, flags) deformed every frame from the story physics, the park swing, smoke, clouds
 // and the cast. update(id, f, camera) poses everything for shot `id` at frame f (pure function of id + f).
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { staticFile } from "remotion";
-import { Batch, Strand, boxGeo, V, lam, buildTown, flagTex, Kit, Ray, kitClone } from "./build";
-import { beam, bed, rep, ctex, planksHD, beamHD, stoneHD, cobbleHD, grassHD, chainHD, waterNear, waterFar, cloudHD } from "./paint";
-import { Pen, fxSign } from "./toon";
-import { LIGHTS, LOOK, LightPreset } from "./lights";
-import { TONE, CHAR, LFB, twoTone, untone } from "./shade";
-import { NOINK } from "./ink";
+import { Batch, Strand, boxGeo, V, lam, flagTex, Kit, Ray, kitClone } from "../../engine/build/build";
+import { loadKenneyKit } from "../../engine/build/assets";
+import { buildTown } from "./town";
+import { beam, bed, rep, ctex, planksHD, beamHD, stoneHD, cobbleHD, grassHD, chainHD, waterNear, waterFar, cloudHD } from "../../engine/look/paint";
+import { Pen, fxSign } from "../../engine/cast/toon";
+import { LIGHTS, LOOK, LightPreset, LightName, LIGHT_NAMES } from "../../engine/look/lights";
+import { TONE, CHAR, LFB, twoTone, untone } from "../../engine/look/shade";
+import { NOINK } from "../../engine/post/ink";
 import { Pool, Actor, Fx, stage, snapFx, splashFx, creakFx, SIGN_AT, SU_SWING } from "./cast";
 import { FPS, D0, SHOTS, PARK, ANCHOR, SNAP, camAt, bridgeState, deckY, dropW, shapeZ, snapEnd, front, BridgeState, V3, smooth, FOREGROUND, ShotDef } from "./story";
 
@@ -18,14 +18,7 @@ const KENNEY = ["tree_oak", "tree_default", "tree_detailed", "tree_fat", "tree_c
   "plant_bush", "hedge", "flower_redA", "flower_yellowA", "flower_purpleA", "grass_large", "grass", "lily_large", "lantern", "cart", "stall-red",
   "stall-green", "stall-bench", "banner-red", "banner-green", "windmill", "canoe"];
 let kitP: Promise<Kit> | null = null;
-export const loadKit = () => {
-  if (!kitP) {
-    const loader = new GLTFLoader();
-    kitP = Promise.all(KENNEY.map((n) => loader.loadAsync(staticFile(`bridge/kenney/${n}.glb`)).then((g) => [n, g.scene] as const).catch(() => [n, null] as const)))
-      .then((list) => Object.fromEntries(list.filter((e) => e[1]).map(([n, s]) => [n, s!])) as Kit);
-  }
-  return kitP;
-};
+export const loadKit = () => (kitP ??= loadKenneyKit(KENNEY, "bridge/kenney"));
 
 // ---------------- bridge geometry constants ----------------
 const NZ = 121; // deck samples every 0.5 m from z = -30 to 30
@@ -99,7 +92,7 @@ export class World {
   private WU: Record<string, THREE.IUniform>;
   private sunDisc: THREE.Sprite; private sunHalo: THREE.Sprite;
   private sunCache = new Map<number, THREE.Vector3>();
-  private cloudMaps: Record<"day" | "golden", THREE.Texture[]>;
+  private cloudMaps: Record<LightName, THREE.Texture[]>;
   private fgs: { o: THREE.Object3D; a: number; b: number }[] = [];
   private deckTop: THREE.BufferGeometry; private deckSide: THREE.BufferGeometry;
   private posts: THREE.InstancedMesh; private hangers: THREE.InstancedMesh; private ribs: THREE.InstancedMesh; private bunting: THREE.InstancedMesh;
@@ -143,7 +136,7 @@ export class World {
     this.sun.shadow.mapSize.set(4096, 4096);
     this.fill = new THREE.DirectionalLight("#9fb8ff", 0.35);
     R.add(this.hemi, this.sun, this.sun.target, this.fill, this.fill.target);
-    this.cloudMaps = { day: [0, 1, 2, 3].map((k) => cloudHD(k, LOOK.day.cloud)), golden: [0, 1, 2, 3].map((k) => cloudHD(k, LOOK.golden.cloud)) };
+    this.cloudMaps = Object.fromEntries(LIGHT_NAMES.map((k) => [k, [0, 1, 2, 3].map((i) => cloudHD(i, LOOK[k].cloud))])) as unknown as Record<LightName, THREE.Texture[]>;
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2 + 0.3, d = 620 + (i % 3) * 60;
       const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: this.cloudMaps.day[i % 4], color: new THREE.Color(1.1, 1.1, 1.1), transparent: true, depthWrite: false, fog: false }));
@@ -359,7 +352,7 @@ export class World {
     this.hemi.color.set(L.sky); this.hemi.groundColor.set(L.ground); this.hemi.intensity = L.hemiI;
     this.sun.color.set(L.sunCol); this.sun.intensity = L.sunI;
     let Rr = THREE.MathUtils.clamp(dist * 1.15 + 7, 12, 95);
-    if (s.light === "golden") Rr = Math.max(Rr, 30); // el 7: 2 m cards throw ~16 m shadows, houses much longer
+    if (L.actorShadow) Rr = Math.max(Rr, 30); // low sun: 2 m cards throw ~16 m shadows, houses much longer
     this.sun.position.copy(focus).addScaledVector(sunDir, 220); this.sun.target.position.copy(focus);
     const sc = this.sun.shadow.camera;
     sc.left = -Rr; sc.right = Rr; sc.top = Rr; sc.bottom = -Rr; sc.near = 20; sc.far = 480; sc.updateProjectionMatrix();
@@ -377,7 +370,7 @@ export class World {
     this.sky.position.copy(cam.position);
     untone(L.fog, this.fog.color); this.fog.near = L.fogNear; this.fog.far = L.fogFar;
     scene.fog = this.fog; scene.background = null;
-    const showSun = s.light === "golden";
+    const showSun = !!L.sunVisible;
     this.sunDisc.visible = this.sunHalo.visible = showSun;
     if (showSun) {
       this.sunDisc.position.copy(cam.position).addScaledVector(sunDir, 900);
@@ -418,7 +411,7 @@ export class World {
       creakFx(t, [3, 5.5, 8].map((dz) => [-2.7, chainY(F + dz, b) + 0.35, F + dz] as V3), st);
     }
     this.frustum.setFromProjectionMatrix(this.m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
-    const tint = s.light === "golden" ? "#ffcf9e" : "#ffffff";
+    const tint = L.sunVisible ? L.sunDisc : "#ffffff";
     let ai = 0;
     const used: Actor[] = [];
     for (const p of st.places) {
