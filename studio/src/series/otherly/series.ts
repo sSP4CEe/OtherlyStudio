@@ -4,7 +4,10 @@ export const SERIES = {
   id: "otherly",
   title: "Otherly",
   tagline: "Small true stories, told by people who were almost there.",
-  /** vertical short, authored at 1080x1920 and exported at 1440x2560 (--scale 1.3333) */
+  /** vertical short, authored at 1080x1920 (base). Render presets:
+   *   - preview: 720x1280  (2/3 scale)
+   *   - production: 1080x1920 (1x scale) — DEFAULT for YouTube Shorts
+   *   - high-quality: 1440x2560 (4/3 scale) */
   width: 1080,
   height: 1920,
   fps: 30,

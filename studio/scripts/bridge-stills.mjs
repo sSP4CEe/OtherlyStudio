@@ -18,7 +18,7 @@ const browserExecutable = process.env.CHROME || null;
 const chromiumOptions = { gl: "angle" };
 const serveUrl = await bundle({ entryPoint: path.resolve(entry), publicDir: path.resolve("public") });
 const composition = await selectComposition({ serveUrl, id, browserExecutable, chromiumOptions });
-const onBrowserLog = (l) => { if (l.type === "error" || l.type === "warning") console.log(`[${l.type}]`, l.text.slice(0, 300)); };
+const onBrowserLog = (l) => { if (l.type === "error" || l.type === "warning" || l.text.includes("[caststats]")) console.log(`[${l.type}]`, l.text.slice(0, 300)); };
 for (const f of frames.split(",").map(Number)) {
   const t0 = Date.now();
   await renderStill({ composition, serveUrl, frame: f, output: `${prefix}${f}.jpg`, imageFormat: "jpeg", jpegQuality: 88, scale: Number(scale),
