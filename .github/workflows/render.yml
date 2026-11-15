@@ -1,0 +1,98 @@
+name: Render Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: 'Episode to render'
+        required: true
+        default: 'BridgeShort'
+        type: choice
+        options:
+          - BridgeShort
+      resolution:
+        description: 'Resolution preset'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+          - high-quality
+      frames:
+        description: 'Frame range (e.g., 0-149 for 5 sec at 30fps)'
+        required: false
+        default: '0-149'
+      voice:
+        description: 'Voice to use (edge-tts voices)'
+        required: false
+        default: 'en-US-EricNeural'
+        type: choice
+        options:
+          - en-US-EricNeural
+          - en-US-GuyNeural
+          - en-US-ChristopherNeural
+          - en-US-RogerNeural
+          - en-US-SteffanNeural
+
+jobs:
+  render:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: studio/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./studio
+        run: npm ci
+
+      - name: Generate voice narration
+        working-directory: ./studio/shorts/bridge/audio
+        run: |
+          python generate_voice_elevenlabs.py
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+
+      - name: Mix audio
+        working-directory: ./studio/shorts/bridge/audio
+        run: python mix.py
+
+      - name: Set resolution scale
+        id: scale
+        run: |
+          if ("${{ github.event.inputs.resolution }}" -eq "preview") {
+            echo "scale=0.6666666666666666" >> $GITHUB_OUTPUT
+          } elseif ("${{ github.event.inputs.resolution }}" -eq "production") {
+            echo "scale=1.0" >> $GITHUB_OUTPUT
+          } else {
+            echo "scale=1.3333333333333333" >> $GITHUB_OUTPUT
+          }
+
+      - name: Render video
+        working-directory: ./studio
+        env:
+          REMOTION_SCALE: ${{ steps.scale.outputs.scale }}
+        run: |
+          npx remotion render src/index.ts ${{ github.event.inputs.episode }} out/video.mp4 \
+            --codec h264 --crf 16 --concurrency 1 \
+            --frames=${{ github.event.inputs.frames }} \
+            --scale=${{ env.REMOTION_SCALE }} \
+            --timeout=600000
+
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.event.inputs.resolution }}-${{ github.event.inputs.frames }}
+          path: studio/out/video.mp4
+          retention-days: 7
